@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Paris">
+<meta name="theme-color" content="#f4f1ea">
+<meta name="robots" content="noindex">
+<title>Paris Trip Map (preview)</title>
+<link rel="stylesheet" href="../leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: slim header with day chips, real map on the top half, the day's stops scrolling below. */
+:root{
+  --paper:#f4f1ea; --card:#ffffff; --ink:#1c2433; --muted:#5d6878; --line:#ddd8cc;
+  --sight:#2f6fed; --food:#d9531e; --shop:#8a4fd6; --base:#1c2433; --accent:#2f6fed;
+  --display:"Bricolage Grotesque","Trebuchet MS",sans-serif;
+  --body:"Figtree",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{ color-scheme:dark; --paper:#161a21; --card:#212732; --ink:#e9edf3; --muted:#9aa5b5; --line:#343c4a;
+    --sight:#4a86f7; --food:#ec6a35; --shop:#a06be8; --base:#56627a; --accent:#6b9dff; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.45;display:flex;flex-direction:column;height:100dvh;-webkit-text-size-adjust:100%}
+header{padding:calc(8px + env(safe-area-inset-top)) 14px 0;flex:0 0 auto}
+h1{font-family:var(--display);font-size:1.2rem;line-height:1.1;margin:0}
+.chips{display:flex;gap:7px;overflow-x:auto;padding:8px 0;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;border:1px solid var(--line);background:var(--card);color:var(--ink);font:600 .86rem var(--body);padding:6px 11px;border-radius:999px;cursor:pointer;text-align:left;line-height:1.15}
+.chip small{display:block;font-weight:500;color:var(--muted);font-size:.7rem}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.chip[aria-pressed="true"] small{color:var(--paper);opacity:.75}
+.chip:focus-visible,.stop:focus-visible,a:focus-visible,input:focus-visible,button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+#mapwrap{position:relative;flex:0 0 46%;min-height:220px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+#map{position:absolute;inset:0;background:#e9e6df}
+#locate{position:absolute;right:10px;bottom:26px;z-index:500;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--accent);cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,.25);display:grid;place-items:center}
+#msg{position:absolute;left:10px;right:60px;top:52px;z-index:500;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:.82rem;box-shadow:0 1px 5px rgba(0,0,0,.2)}
+#msg[hidden]{display:none}
+#filters{position:absolute;left:10px;top:10px;z-index:500;display:flex;gap:6px}
+.f,#tools button{border:1px solid var(--line);background:var(--card);color:var(--ink);font:600 .78rem var(--body);border-radius:999px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.22)}
+.f{padding:7px 10px;display:flex;align-items:center;gap:6px}
+.f::before{content:"";width:10px;height:10px;border-radius:50%}
+.f.sight::before{background:var(--sight)} .f.food::before{background:var(--food)} .f.shop::before{background:var(--shop)}
+.f[aria-pressed="false"]{opacity:.6;text-decoration:line-through}
+#tools{position:absolute;left:10px;bottom:26px;z-index:500;display:flex;gap:6px}
+#tools button{height:38px;padding:0 13px}
+body.full main,body.full h1{display:none}
+body.full #mapwrap{flex:1 1 auto}
+main{flex:1 1 auto;overflow-y:auto;padding:4px 14px calc(28px + env(safe-area-inset-bottom));-webkit-overflow-scrolling:touch}
+.pin{width:30px;height:30px;border-radius:50%;border:3px solid #fff;color:#fff;font:700 13px/1 var(--body);display:grid;place-items:center;box-shadow:0 2px 5px rgba(0,0,0,.35);font-variant-numeric:tabular-nums}
+.pin.sight{background:var(--sight)} .pin.food{background:var(--food)} .pin.shop{background:var(--shop)} .pin.base{background:#1c2433}
+.pin.dot{width:18px;height:18px;border-width:2px}
+.pin.on{transform:scale(1.3);box-shadow:0 0 0 5px rgba(47,111,237,.3),0 2px 5px rgba(0,0,0,.35)}
+.me{width:18px;height:18px;border-radius:50%;background:#1a73e8;border:3px solid #fff;box-shadow:0 0 0 6px rgba(26,115,232,.25)}
+.leaflet-popup-content{margin:10px 12px;font:500 .88rem/1.35 var(--body);color:#1c2433}
+.leaflet-popup-content b{display:block;font-size:.95rem}
+.leaflet-popup-content a{font-weight:700;color:#2f6fed;margin-right:10px}
+h2{font-family:var(--display);font-size:1.1rem;margin:12px 0 2px;text-wrap:balance}
+.daynote{color:var(--muted);font-size:.88rem;margin:0 0 10px}
+.list{display:flex;flex-direction:column;gap:8px}
+.stop{display:grid;grid-template-columns:32px 1fr;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;border-left:5px solid var(--line)}
+.stop.sight{border-left-color:var(--sight)} .stop.food{border-left-color:var(--food)} .stop.shop{border-left-color:var(--shop)} .stop.base{border-left-color:var(--base)}
+.stop.on{box-shadow:0 0 0 2px var(--accent)}
+.stop.done{opacity:.55} .stop.done .name{text-decoration:line-through}
+.num{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:700 .82rem var(--body);color:#fff;font-variant-numeric:tabular-nums}
+.sight .num{background:var(--sight)} .food .num{background:var(--food)} .shop .num{background:var(--shop)} .base .num{background:var(--base)}
+.time{font:600 .76rem var(--body);color:var(--muted);font-variant-numeric:tabular-nums}
+.name{font-weight:700;margin:0;font-size:.98rem}
+.note{margin:2px 0 6px;font-size:.88rem;overflow-wrap:anywhere}
+.tags{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.tag{font-size:.7rem;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.tag.book{border-color:var(--food);color:var(--food)}
+a.go{font-size:.82rem;font-weight:700;color:var(--accent);text-decoration:underline;text-underline-offset:3px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-top:10px}
+.panel h3{font:700 .98rem var(--body);margin:0 0 4px}
+.panel ul{margin:0;padding-left:18px} .panel li{margin:4px 0;font-size:.9rem}
+.check{display:grid;grid-template-columns:26px 1fr;gap:8px;align-items:start;padding:9px 0;border-top:1px solid var(--line);font-size:.92rem}
+.check:first-of-type{border-top:0}
+.check input{width:22px;height:22px;margin:1px 0 0;accent-color:var(--accent)}
+.check b{display:block} .check span{color:var(--muted);font-size:.84rem}
+.check.ticked b{text-decoration:line-through;color:var(--muted)}
+footer{color:var(--muted);font-size:.76rem;margin-top:18px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Paris trip</h1>
+  <div class="chips" id="chips" role="group" aria-label="Choose a day"></div>
+</header>
+<div id="mapwrap">
+  <div id="map" aria-label="Street map of Paris with the stops for the chosen day"></div>
+  <div id="filters" role="group" aria-label="Choose which pins to show">
+    <button class="f sight" data-k="sight" aria-pressed="true">Sights</button>
+    <button class="f food" data-k="food" aria-pressed="true">Food</button>
+    <button class="f shop" data-k="shop" aria-pressed="true">Shops</button>
+  </div>
+  <div id="tools"><button id="style"></button><button id="full">Full map</button></div>
+  <div id="msg" hidden></div>
+  <button id="locate" aria-label="Show where I am">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+  </button>
+</div>
+<main id="main"></main>
+
+<script src="../leaflet.js"></script>
+<script>
+const P = {"hotel":{"n":"Start point: Miromesnil metro","k":"base","la":48.8735,"lo":2.316,"a":""},"kayser":{"n":"Maison Kayser Boétie-Miromesnil","k":"food","la":48.8733,"lo":2.3142,"a":"29 rue La Boétie, 75008 Paris"},"marx":{"n":"Thierry Marx Bakery","k":"food","la":48.8757,"lo":2.3185,"a":"51 rue de Laborde, 75008 Paris"},"champs":{"n":"Avenue des Champs-Élysées","k":"shop","la":48.8698,"lo":2.3078,"a":"Avenue des Champs-Élysées, 75008 Paris"},"arc":{"n":"Arc de Triomphe rooftop","k":"sight","la":48.8738,"lo":2.295,"a":"Place Charles de Gaulle, 75008 Paris"},"troca":{"n":"Trocadéro viewpoint","k":"sight","la":48.8616,"lo":2.2893,"a":"Place du Trocadéro, 75016 Paris"},"eiffel":{"n":"Eiffel Tower","k":"sight","la":48.8584,"lo":2.2945,"a":"Champ de Mars, 75007 Paris"},"cocottes":{"n":"Les Cocottes","k":"food","la":48.858,"lo":2.302,"a":"135 rue Saint-Dominique, 75007 Paris"},"versailles":{"n":"Palace of Versailles","k":"sight","a":"Place d'Armes, 78000 Versailles","la":48.8049,"lo":2.1204},"flottille":{"n":"La Flottille (Grand Canal, Versailles)","k":"food","a":"Parc du Château de Versailles, 78000 Versailles","la":48.8087,"lo":2.1107},"vgardens":{"n":"Versailles gardens and Trianon","k":"sight","a":"Grand Trianon, 78000 Versailles","la":48.8147,"lo":2.1048},"sgp":{"n":"Saint-Germain-des-Prés and Café de Flore","k":"sight","la":48.854,"lo":2.3334,"a":"Place Saint-Germain-des-Prés, 75006 Paris"},"bonmarche":{"n":"Le Bon Marché and La Grande Épicerie","k":"shop","la":48.851,"lo":2.3245,"a":"24 rue de Sèvres, 75007 Paris"},"fernand":{"n":"Chez Fernand Christine","k":"food","la":48.8545,"lo":2.3402,"a":"9 rue Christine, 75006 Paris"},"louvre":{"n":"Louvre Museum","k":"sight","la":48.8606,"lo":2.3376,"a":"Musée du Louvre, 75001 Paris"},"tuileries":{"n":"Tuileries Garden","k":"sight","la":48.8635,"lo":2.3275,"a":"Jardin des Tuileries, 75001 Paris"},"palais":{"n":"Palais Royal gardens","k":"sight","la":48.8642,"lo":2.3371,"a":"Jardin du Palais Royal, 75001 Paris"},"vivienne":{"n":"Galerie Vivienne and Bistrot Vivienne","k":"food","la":48.8667,"lo":2.3397,"a":"4 rue des Petits Champs, 75002 Paris"},"opera":{"n":"Opéra Garnier","k":"sight","la":48.872,"lo":2.3316,"a":"Place de l'Opéra, 75009 Paris"},"lafayette":{"n":"Galeries Lafayette and Printemps","k":"shop","la":48.8737,"lo":2.332,"a":"40 Boulevard Haussmann, 75009 Paris"},"fontaine":{"n":"La Fontaine de Mars","k":"food","la":48.8581,"lo":2.3025,"a":"129 rue Saint-Dominique, 75007 Paris"},"tournelles":{"n":"Bistrot des Tournelles","k":"food","la":48.854,"lo":2.3676,"a":"6 rue des Tournelles, 75004 Paris"},"bongeorges":{"n":"Le Bon Georges","k":"food","la":48.8785,"lo":2.3375,"a":"45 rue Saint-Georges, 75009 Paris"},"chapelle":{"n":"Sainte-Chapelle","k":"sight","la":48.8554,"lo":2.345,"a":"10 Boulevard du Palais, 75001 Paris"},"notredame":{"n":"Notre-Dame Cathedral","k":"sight","la":48.853,"lo":2.3499,"a":"6 Parvis Notre-Dame, 75004 Paris"},"shakes":{"n":"Shakespeare and Company, Odette","k":"shop","la":48.8525,"lo":2.347,"a":"37 rue de la Bûcherie, 75005 Paris"},"breizh":{"n":"Breizh Café","k":"food","la":48.8612,"lo":2.3632,"a":"109 rue Vieille du Temple, 75003 Paris"},"merci":{"n":"Merci concept store","k":"shop","la":48.8606,"lo":2.3667,"a":"111 Boulevard Beaumarchais, 75003 Paris"},"francs":{"n":"Rue des Francs-Bourgeois","k":"shop","la":48.8577,"lo":2.3615,"a":"Rue des Francs-Bourgeois, 75004 Paris"},"vosges":{"n":"Place des Vosges","k":"sight","la":48.8556,"lo":2.3655,"a":"Place des Vosges, 75004 Paris"},"abbesses":{"n":"Rue des Abbesses and Place du Tertre","k":"shop","la":48.885,"lo":2.3388,"a":"Rue des Abbesses, 75018 Paris"},"sacre":{"n":"Sacré-Cœur","k":"sight","la":48.8867,"lo":2.3431,"a":"35 rue du Chevalier de la Barre, 75018 Paris"},"bouillon":{"n":"Bouillon Pigalle","k":"food","la":48.8825,"lo":2.3375,"a":"22 Boulevard de Clichy, 75018 Paris"},"monceau":{"n":"Parc Monceau","k":"sight","la":48.8797,"lo":2.309,"a":"35 Boulevard de Courcelles, 75008 Paris"},"laduree":{"n":"Ladurée Champs-Élysées","k":"food","la":48.8709,"lo":2.3032,"a":"75 Avenue des Champs-Élysées, 75008 Paris"},"fbg":{"n":"Rue du Faubourg Saint-Honoré","k":"shop","la":48.8722,"lo":2.3125,"a":"Rue du Faubourg Saint-Honoré, 75008 Paris"}};
+const DAYS = [{"id":"d1","chip":"Wed 24","sub":"Arrival","title":"Wednesday 24: Champs-Élysées and the Eiffel Tower","note":"Sunset is around 18:25. Dress warm for the rooftop and the tower.","stops":[["13:00","hotel","Drop your bags at reception. Standard check-in starts at 15:00."],["13:30","kayser","Quick lunch in the bakery café: sandwiches, quiches, pastries. 5 minutes on foot."],["15:00","hotel","Check in and unpack."],["15:45","champs","Walk up the avenue towards the Arc. Galeries Lafayette Champs-Élysées is at number 60."],["17:15","arc","Climb to the rooftop for the view down twelve avenues as the light fades.","book"],["18:30","troca","Metro line 6 from Charles de Gaulle Étoile to Trocadéro. Best photo spot of the lit tower."],["19:30","cocottes","Casual French dishes served in cast-iron pots. Go early; ask if they take a booking."],["21:15","eiffel","Go up after dinner. The tower sparkles for 5 minutes on the hour after dark.","book"]]},{"id":"d2","chip":"Thu 25","sub":"Versailles","title":"Thursday 25: Versailles, then Saint-Germain","note":"Versailles is 17 km southwest of Paris. Metro 13 from Miromesnil to Invalides, then RER C to Versailles Château Rive Gauche and a 10 minute walk. A normal 2.55 € ticket covers it.","stops":[["08:00","marx","Croissants and coffee before the train. Opens 7:30."],["09:30","versailles","State Apartments and the Hall of Mirrors. The palace is open 9:00 to 17:30 in winter.","book"],["12:30","flottille","Lunch beside the Grand Canal. Angelina inside the palace is the backup."],["13:45","vgardens","Gardens are free in winter. Trianon and the Queen's Hamlet open at 12:00 with the Passport ticket."],["17:15","sgp","RER C back to Saint-Michel Notre-Dame, 10 minutes on foot. Warm up with a drink at Café de Flore."],["18:15","bonmarche","The Left Bank department store and its food hall. Open late on Thursdays."],["20:00","fernand","Classic bistro on a quiet side street: boeuf bourguignon, good wine list.","book"]]},{"id":"d3","chip":"Fri 26","sub":"Louvre","title":"Friday 26: Louvre, shopping and a special dinner","note":"Keep the late afternoon free to rest and get ready. Pick ONE of the three dinner options and book it.","stops":[["08:15","marx","Breakfast near your base."],["09:00","louvre","Metro 9 to Franklin D. Roosevelt, then line 1 to Palais Royal. Allow 3 hours: Mona Lisa, Winged Victory, Venus de Milo.","book"],["12:15","tuileries","Short walk through the garden next to the museum."],["12:45","palais","Quiet arcades and the striped Buren columns. Good photos."],["13:15","vivienne","Lunch at Bistrot Vivienne inside the prettiest covered passage in Paris."],["14:45","opera","Walk past the opera house on the way to the department stores."],["15:00","lafayette","See the glass dome, then the free rooftop terrace. Printemps is next door."],["16:45","hotel","Walk back, about 15 minutes. Rest and change."],["19:30","fontaine","Option A. Red-check tablecloths, south-west French classics. 10 minute walk to the Eiffel Tower sparkle afterwards.","pick"],["19:30","tournelles","Option B. Small, candle-lit Marais bistro, dinner only. Tables go fast.","pick"],["19:30","bongeorges","Option C. Closest to your base, market cooking and a serious wine list. Top of the budget.","pick"]]},{"id":"d4","chip":"Sat 27","sub":"Old Paris","title":"Saturday 27: Notre-Dame, Le Marais and Montmartre","note":"A walking day. Sunset from the Sacré-Cœur steps is around 18:30.","stops":[["08:30","kayser","Breakfast. Opens 7:00 on Saturdays."],["09:30","chapelle","Stained glass is best in morning light. Winter hours 9:00 to 17:00.","book"],["10:30","notredame","Free entry. A free time slot can be reserved about 3 days ahead, or just queue."],["11:30","shakes","The famous English bookshop, then cream puffs at Odette around the corner."],["13:00","breizh","Buckwheat galettes and cider. Walk over via Île Saint-Louis.","book"],["14:15","merci","Three floors of fashion and homeware. A good place for a gift."],["15:00","francs","Main Marais shopping street: French labels, perfume, small boutiques."],["15:45","vosges","The oldest planned square in Paris. Sit under the arcades."],["16:45","abbesses","Metro to Abbesses. Village streets, artists on Place du Tertre."],["18:00","sacre","Watch the city light up from the steps. The basilica is free to enter."],["19:30","bouillon","Big, lively, cheap French classics. Book online or expect a queue."]]},{"id":"d5","chip":"Sun 28","sub":"Departure","title":"Sunday 28: slow morning, leave at 14:00","note":"Everything is within walking distance of your base. Check-out is 11:00, so ask reception to hold your bags.","stops":[["10:00","monceau","10 minute walk. Locals jogging, a small colonnade and pond."],["11:00","hotel","Check out and store the bags."],["11:30","laduree","Brunch and macarons to take home. Both neighbourhood bakeries are closed on Sundays."],["12:45","fbg","Window shopping on the way back: the big fashion houses line this street."],["13:45","hotel","Collect the bags. Leave for the airport at 14:00."]]}];
+const BOOK = [["b1","Special dinner, Fri 26 at 19:30","Book first. Many bistros open bookings 2 to 4 weeks ahead."],["b2","Eiffel Tower, Wed 24 around 21:15","Official site toureiffel.paris. Tickets go on sale 60 days ahead, so from 26 December."],["b3","Louvre, Fri 26 at 09:00","Timed ticket on louvre.fr. Check the site that morning for late openings."],["b4","Versailles Passport, Thu 25 at 09:30","Timed entry on chateauversailles.fr. The Passport includes Trianon."],["b5","Sainte-Chapelle, Sat 27 at 09:30","Timed ticket on the official Centre des monuments nationaux site."],["b6","Arc de Triomphe, Wed 24","Ticket from the same monuments site. No fixed time slot needed."],["b7","Notre-Dame, Sat 27","Optional free slot on notredamedeparis.fr, released about 3 days before."],["b8","Chez Fernand Christine, Thu 25 at 20:00","Reserve a table for two."],["b9","Breizh Café, Sat 27 at 13:00","Saturday lunch fills up; reserve."]];
+
+const KIND = {sight:"Sight",food:"Food",shop:"Shopping",base:"Base"};
+let cur = "d1", sel = null;
+const day = id => DAYS.find(d => d.id===id);
+const store = k => ({ get(){ try{ return JSON.parse(localStorage.getItem(k)||"{}"); }catch(e){ return {}; } }, set(o){ try{ localStorage.setItem(k, JSON.stringify(o)); }catch(e){} } });
+const DONE = store("paris-done"), CHECKS = store("paris-book");
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+const q = p => encodeURIComponent(p.n.split(",")[0].split(" and ")[0]+", "+p.a);
+const links = p => p.a ? `<a class="go" href="https://maps.apple.com/?q=${q(p)}" target="_blank" rel="noopener">Apple Maps</a><a class="go" href="https://www.google.com/maps/search/?api=1&query=${q(p)}" target="_blank" rel="noopener">Google Maps</a>` : "";
+
+// ---------- Map ----------
+const map = L.map("map", {zoomControl:false}).setView([48.866, 2.325], 13);
+L.control.zoom({position:"topright"}).addTo(map);
+const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+const TILES = {
+  clean: L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {subdomains:"abcd", maxZoom:20, attribution: OSM+' &copy; <a href="https://carto.com/attributions">CARTO</a>'}),
+  detail: L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution: OSM})
+};
+const PREF = store("paris-pref");
+let style = PREF.get().style==="detail" ? "detail" : "clean";
+TILES[style].addTo(map);
+const show = {sight:true, food:true, shop:true};
+const layer = L.layerGroup().addTo(map);
+let meMark = null, meRing = null;
+
+function dayOrder(){
+  const all = cur==="all" || cur==="todo" || cur==="book", d = day(cur), order = [];
+  if(all) Object.keys(P).forEach(k => order.push(k));
+  else { d.stops.forEach(s => { if(!order.includes(s[1])) order.push(s[1]); }); if(!order.includes("hotel")) order.push("hotel"); }
+  return {all, d, order};
+}
+function drawMap(fit){
+  layer.clearLayers();
+  const {all, d, order} = dayOrder(), done = DONE.get(), nums = order.filter(i => i!=="hotel"), ll = [];
+  if(!all && d){
+    const path = d.stops.map(s => s[1]).filter(id => !done[id]).map(id => [P[id].la, P[id].lo]);
+    L.polyline(path, {color:"#2f6fed", weight:3, opacity:.55, dashArray:"5 9", interactive:false}).addTo(layer);
+  }
+  order.forEach(id => {
+    const p = P[id]; if(done[id] || (p.k!=="base" && !show[p.k])) return;
+    const small = all && id!=="hotel", on = sel===id;
+    const label = id==="hotel" ? "&#8962;" : (all ? "" : nums.indexOf(id)+1);
+    const sz = small ? 18 : 30;
+    const icon = L.divIcon({className:"", html:`<div class="pin ${p.k}${small?" dot":""}${on?" on":""}">${label}</div>`, iconSize:[sz,sz], iconAnchor:[sz/2,sz/2]});
+    L.marker([p.la, p.lo], {icon, title:p.n, zIndexOffset: on?1000:(id==="hotel"?-100:0)}).addTo(layer).on("click", () => pick(id, true));
+    ll.push([p.la, p.lo]);
+  });
+  if(fit && ll.length) map.fitBounds(ll, {padding:[34,34], maxZoom:16});
+}
+
+// ---------- Lists ----------
+function stopCard(s, n){
+  const [t,id,note,flag] = s, p = P[id];
+  const tag = flag==="book" ? `<span class="tag book">Book ahead</span>` : flag==="pick" ? `<span class="tag book">Dinner option</span>` : "";
+  const vis = DONE.get()[id] ? `<span class="tag">Visited</span>` : "";
+  return `<div class="stop ${p.k}${sel===id?" on":""}${vis?" done":""}" data-id="${id}" tabindex="0" role="button" aria-label="${esc(p.n)}">
+    <div class="num">${id==="hotel"?"&#8962;":n}</div>
+    <div><div class="time">${t} · ${KIND[p.k]}</div><p class="name">${esc(p.n)}</p><p class="note">${esc(note)}</p>
+    <div class="tags">${vis}${tag}${links(p)}</div></div></div>`;
+}
+function dayHtml(d){
+  const order = []; d.stops.forEach(s => { if(s[1]!=="hotel" && !order.includes(s[1])) order.push(s[1]); });
+  return `<h2>${esc(d.title)}</h2><p class="daynote">${esc(d.note)}</p><div class="list">` + d.stops.map(s => stopCard(s, order.indexOf(s[1])+1)).join("") + `</div>`;
+}
+function todoHtml(){
+  const done = DONE.get(), seen = {}; let total = 0, n = 0, out = "";
+  DAYS.forEach(d => {
+    const ids = d.stops.map(s => s[1]).filter(id => id!=="hotel" && !seen[id] && (seen[id]=1));
+    if(!ids.length) return;
+    out += `<div class="panel"><h3>${d.chip} · ${d.sub}</h3>` + ids.map(id => { total++; if(done[id]) n++;
+      return `<label class="check${done[id]?" ticked":""}" for="t-${id}"><input type="checkbox" id="t-${id}" data-place="${id}" ${done[id]?"checked":""}><div><b>${esc(P[id].n)}</b><span>${KIND[P[id].k]}</span></div></label>`; }).join("") + `</div>`;
+  });
+  return `<h2>Places to do</h2><p class="daynote">Tick a place when you have been there and its pin leaves the map. Untick to bring it back. <b>${n} of ${total} done.</b> Ticks are saved on this phone only.</p>` + out;
+}
+function bookHtml(){
+  const c = CHECKS.get();
+  return `<h2>Bookings and practical notes</h2><p class="daynote">Tick things off as you book them. Saved on this phone only.</p>
+  <div class="panel">${BOOK.map(([id,t,n]) => `<label class="check" for="${id}"><input type="checkbox" id="${id}" ${c[id]?"checked":""}><div><b>${esc(t)}</b><span>${esc(n)}</span></div></label>`).join("")}</div>
+  <div class="panel"><h3>Money savers</h3><ul>
+    <li>If either of you is under 26 and lives in the EU, the Louvre, Versailles, Sainte-Chapelle and the Arc de Triomphe are free with ID. You still reserve a time slot.</li>
+    <li>Lunch set menus (formule) cost far less than dinner at the same restaurant.</li>
+    <li>Notre-Dame, the Sacré-Cœur and the Galeries Lafayette rooftop are free.</li></ul></div>
+  <div class="panel"><h3>Getting around</h3><ul>
+    <li>Your station is Miromesnil, lines 9 and 13.</li>
+    <li>One metro, RER or train ride costs 2.55 €, including Versailles. Load tickets on a Navigo Easy card (2 €) or on your phone.</li>
+    <li>The airport ticket is 14 € and cannot sit on the same card as metro tickets.</li></ul></div>
+  <div class="panel"><h3>Late February in Paris</h3><ul>
+    <li>Cold and often wet, roughly 3 to 10 °C. Bring a warm coat, scarf and a small umbrella.</li>
+    <li>It gets dark around 18:30.</li>
+    <li>Watch your pockets around the Eiffel Tower, Sacré-Cœur and on the metro.</li></ul></div>
+  <footer>Hours and rules checked in November 2026. Confirm opening hours the day before. Map data from OpenStreetMap.</footer>`;
+}
+function render(fit){
+  document.getElementById("chips").innerHTML =
+    DAYS.map(d => `<button class="chip" data-day="${d.id}" aria-pressed="${cur===d.id}">${d.chip}<small>${d.sub}</small></button>`).join("") +
+    `<button class="chip" data-day="all" aria-pressed="${cur==="all"}">All days<small>Whole trip</small></button>` +
+    `<button class="chip" data-day="todo" aria-pressed="${cur==="todo"}">To do<small>Tick places</small></button>` +
+    `<button class="chip" data-day="book" aria-pressed="${cur==="book"}">To book<small>Checklist</small></button>`;
+  drawMap(fit);
+  const main = document.getElementById("main");
+  main.innerHTML = cur==="book" ? bookHtml() : cur==="todo" ? todoHtml() : cur==="all" ? DAYS.map(dayHtml).join("") : dayHtml(day(cur));
+}
+function pick(id, fromMap){
+  sel = sel===id ? null : id;
+  drawMap(false);
+  map.closePopup();
+  document.querySelectorAll(".stop").forEach(el => el.classList.toggle("on", el.dataset.id===sel));
+  if(!sel) return;
+  const p = P[sel], at = [p.la, p.lo];
+  if(fromMap){ const el = document.querySelector('.stop[data-id="'+sel+'"]'); if(el) el.scrollIntoView({block:"nearest", behavior:"smooth"}); }
+  else map.setView(at, Math.max(map.getZoom(), 15));
+  L.popup({offset:[0,-14], closeButton:false, autoPan:fromMap}).setLatLng(at).setContent(`<b>${esc(p.n)}</b>${links(p)}`).openOn(map);
+}
+
+// ---------- Events ----------
+document.getElementById("chips").addEventListener("click", e => {
+  const b = e.target.closest("[data-day]"); if(!b) return;
+  cur = b.dataset.day; sel = null; map.closePopup(); render(true);
+  document.getElementById("main").scrollTop = 0;
+});
+const mainEl = document.getElementById("main");
+mainEl.addEventListener("click", e => {
+  if(e.target.closest("a")) return;
+  const c = e.target.closest(".stop"); if(c) pick(c.dataset.id, false);
+});
+mainEl.addEventListener("keydown", e => {
+  if((e.key==="Enter"||e.key===" ") && e.target.classList.contains("stop")){ e.preventDefault(); pick(e.target.dataset.id, false); }
+});
+mainEl.addEventListener("change", e => {
+  if(e.target.type!=="checkbox") return;
+  if(e.target.dataset.place){ const c = DONE.get(); c[e.target.dataset.place] = e.target.checked; DONE.set(c); const y = mainEl.scrollTop; render(false); mainEl.scrollTop = y; }
+  else { const c = CHECKS.get(); c[e.target.id] = e.target.checked; CHECKS.set(c); }
+});
+const msg = document.getElementById("msg");
+function say(t){ msg.textContent = t; msg.hidden = !t; if(t) setTimeout(() => { msg.hidden = true; }, 6000); }
+document.getElementById("locate").addEventListener("click", () => { say("Finding you..."); map.locate({setView:true, maxZoom:16, enableHighAccuracy:true}); });
+map.on("locationfound", e => {
+  say("");
+  if(meMark){ map.removeLayer(meMark); map.removeLayer(meRing); }
+  meRing = L.circle(e.latlng, {radius:e.accuracy, color:"#1a73e8", weight:1, fillOpacity:.08, interactive:false}).addTo(map);
+  meMark = L.marker(e.latlng, {icon:L.divIcon({className:"", html:'<div class="me"></div>', iconSize:[18,18], iconAnchor:[9,9]}), interactive:false, zIndexOffset:2000}).addTo(map);
+});
+map.on("locationerror", () => say("Could not get your location. Allow location access for this site in your phone settings, then tap again."));
+window.addEventListener("resize", () => map.invalidateSize());
+document.getElementById("filters").addEventListener("click", e => {
+  const b = e.target.closest("[data-k]"); if(!b) return;
+  show[b.dataset.k] = !show[b.dataset.k]; b.setAttribute("aria-pressed", show[b.dataset.k]); drawMap(false);
+});
+const styleBtn = document.getElementById("style"), fullBtn = document.getElementById("full");
+const styleLabel = () => { styleBtn.textContent = style==="clean" ? "Detailed map" : "Clean map"; };
+styleBtn.addEventListener("click", () => {
+  map.removeLayer(TILES[style]); style = style==="clean" ? "detail" : "clean"; TILES[style].addTo(map);
+  const p = PREF.get(); p.style = style; PREF.set(p); styleLabel();
+});
+fullBtn.addEventListener("click", () => {
+  const on = document.body.classList.toggle("full"); fullBtn.textContent = on ? "Show list" : "Full map";
+  setTimeout(() => map.invalidateSize(), 60);
+});
+styleLabel();
+render(true);
+</script>
+</body>
+</html>
