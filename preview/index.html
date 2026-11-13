@@ -100,7 +100,7 @@ footer{color:var(--muted);font-size:.76rem;margin-top:18px}
     <button class="f food" data-k="food" aria-pressed="true">Food</button>
     <button class="f shop" data-k="shop" aria-pressed="true">Shops</button>
   </div>
-  <div id="tools"><button id="style"></button><button id="full">Full map</button></div>
+  <div id="tools"><button id="style" aria-label="Change map style"></button><button id="full">Full map</button></div>
   <div id="msg" hidden></div>
   <button id="locate" aria-label="Show where I am">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
@@ -126,15 +126,27 @@ const q = p => encodeURIComponent(p.n.split(",")[0].split(" and ")[0]+", "+p.a);
 const links = p => p.a ? `<a class="go" href="https://maps.apple.com/?q=${q(p)}" target="_blank" rel="noopener">Apple Maps</a><a class="go" href="https://www.google.com/maps/search/?api=1&query=${q(p)}" target="_blank" rel="noopener">Google Maps</a>` : "";
 
 // ---------- Map ----------
-const map = L.map("map", {zoomControl:false}).setView([48.866, 2.325], 13);
+const map = L.map("map", {zoomControl:false, maxZoom:18}).setView([48.866, 2.325], 13);
 L.control.zoom({position:"topright"}).addTo(map);
+function GL(name){
+  if(!(window.maplibregl && L.maplibreGL)) return null;
+  const layer = L.maplibreGL({style:"https://tiles.openfreemap.org/styles/"+name, attribution: OSM+' &middot; <a href="https://openfreemap.org">OpenFreeMap</a>'});
+  layer.on("add", () => {            // keep the map flat: drop any 3D building layers
+    try{ const m = layer.getMaplibreMap(), flat = () => m.getStyle().layers.filter(l => l.type==="fill-extrusion").forEach(l => m.removeLayer(l.id));
+      m.isStyleLoaded() ? flat() : m.once("load", flat); }catch(e){}
+  });
+  return layer;
+}
 const OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const TILES = {
-  clean: (window.maplibregl && L.maplibreGL) ? L.maplibreGL({style:"https://tiles.openfreemap.org/styles/liberty", attribution: OSM+' &middot; <a href="https://openfreemap.org">OpenFreeMap</a>'}) : null,
+  simple: GL("positron"),
+  colour: GL("bright"),
   detail: L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution: OSM})
 };
 const PREF = store("paris-pref");
-let style = (PREF.get().style==="detail" || !TILES.clean) ? "detail" : "clean";
+const ORDER = ["simple","colour","detail"].filter(k => TILES[k]);
+const NAMES = {simple:"Simple", colour:"Colour", detail:"Detailed"};
+let style = ORDER.includes(PREF.get().style) ? PREF.get().style : ORDER[0];
 TILES[style].addTo(map);
 const show = {sight:true, food:true, shop:true};
 const layer = L.layerGroup().addTo(map);
@@ -264,10 +276,10 @@ document.getElementById("filters").addEventListener("click", e => {
   show[b.dataset.k] = !show[b.dataset.k]; b.setAttribute("aria-pressed", show[b.dataset.k]); drawMap(false);
 });
 const styleBtn = document.getElementById("style"), fullBtn = document.getElementById("full");
-const styleLabel = () => { styleBtn.textContent = style==="clean" ? "Detailed map" : "Clean map"; };
-if(!TILES.clean) styleBtn.hidden = true;
+const styleLabel = () => { styleBtn.textContent = "Map: "+NAMES[style]; };
+if(ORDER.length<2) styleBtn.hidden = true;
 styleBtn.addEventListener("click", () => {
-  map.removeLayer(TILES[style]); style = style==="clean" ? "detail" : "clean"; TILES[style].addTo(map);
+  map.removeLayer(TILES[style]); style = ORDER[(ORDER.indexOf(style)+1) % ORDER.length]; TILES[style].addTo(map);
   const p = PREF.get(); p.style = style; PREF.set(p); styleLabel();
 });
 fullBtn.addEventListener("click", () => {
